@@ -25,6 +25,12 @@ def skew(p):
             skew_p[i,0,:] = torch.tensor([torch.tensor(0.0), -p_temp[2], p_temp[1]])
             skew_p[i,1,:] = torch.tensor([p_temp[2], torch.tensor(0.0), -p_temp[0]])
             skew_p[i,2,:] = torch.tensor([-p_temp[1], p_temp[0],torch.tensor(0.0)])
+    elif len(p.size()) == 1:
+        skew_p = torch.tensor([
+            [0, -p[2], p[1]],
+            [p[2], 0, -p[0]],
+            [-p[1], p[0], 0]
+        ]).to(device)
     else:
         raise(Exception("demension for p is invalid"))
 
@@ -115,74 +121,57 @@ def pr2t(p,r):
         raise(Exception("demension for position or orientation is invalid"))
     return T
 
-def POE(twist, q_value, verbose =False): #number of set of twist is one & number of q_value is n_joint
+def srodrigues(twist, q_value, verbose =False): #number of set of twist is one & number of q_value is n_joint
     eps = 1e-10
     device = twist.device
+    batch_size = q_value.size(0)
+    T = torch.zeros(batch_size,4,4,dtype=torch.float).to(device)
 
-    assert(twist.size()[1] == 6)
+    #number of joint
+    w = twist[:3]
+    v = twist[3:]
+    theta = w.norm(dim=0)
 
-    if len(q_value.size()) == 1:
-        #PLZ Fill me
-        pass
+    if theta.item() < eps:
+        theta = v.norm(dim=0)
 
-    elif len(q_value.size()) == 2:                      #q_value.size() = [batch_size, n_joint] #twist.size() = [n_joint,6,1]
-        assert(twist.size()[0] == q_value.size()[1])    #number of n_joint should be same
-        batch_size = q_value.size()[0]
-        n_joint = twist.size()[0]
-        T = torch.zeros(batch_size,4,4).to(device)
-        
-        for batch in range(batch_size):
-            poe = torch.eye(4).to(device)
-            for joint in range(n_joint):
-                T_temp = torch.zeros(4,4,dtype = torch.float).to(device)
-                w = twist[joint,0:3,0].view(3,1)
-                v = twist[joint,3:6,0].view(3,1)
-                if torch.norm(w) < eps:
-                    if torch.norm(v) <  eps:
-                        theta = 1
-                    else:
-                        theta = torch.norm(w)
-                elif abs(torch.norm(w) - 1) > eps:
-                    if verbose:
-                        print("Warning: [POE] >> joint twist not normalized")
-                    theta = torch.norm(w)
-                else:
-                    theta = 1
-                w = w/theta
-                v = v/theta
-                q = q_value[batch,joint] * theta
-                
-                A = rodrigues(w,q)
-                B = (q*torch.eye(3).to(device)+(1-torch.cos(q))*skew(w) + (q-torch.sin(q))*skew(w)@skew(w)) @ v
-                T_temp[0:3,0:3] = A
-                T_temp[0:3,3] = B.squeeze()
-                T_temp[3,3] = 1
-                poe = poe @ T_temp
-            T[batch] = poe
+    q_value = q_value * theta
+    w = w/theta
+    v = v/theta
+    w_skew = skew(w)
+
+    # print("q_value:", q_value.device)
+    # print("w:", w.device)
+    # print("(1-torch.cos(q_value):", (1-torch.cos(q_value)).device)
+    # print("w_skew @ v:", (w_skew @ v).device)
+
+    T[:,:3,:3] = rodrigues(w, q_value)
+    T[:,:3,3] =  torch.outer(q_value,v) + \
+        torch.outer((1-torch.cos(q_value)), w_skew @ v) + \
+        torch.outer(q_value-torch.sin(q_value), w_skew@w_skew@v)
+    T[:,3,3] = 1
     
-
-    else:
-        raise(Exception("demension for twist & q_value doesn't match"))
-
     return T
-
 
 def rodrigues(w,q,verbose = False):
     eps = 1e-10
-    device = w.device
+    device = q.device
+    batch_size = q.size()[0]
 
     if torch.norm(w) < eps:
-        R = torch.eye(3).to(device)
+        R = torch.tile(torch.eye(3),(batch_size,1,1)).to(device)
         return R
     if abs(torch.norm(w)-1) > eps:
         if verbose:
             print("Warning: [rodirgues] >> joint twist not normalized")
-    
+
     theta = torch.norm(w)
     w = w/theta
     q = q*theta
 
     w_skew = skew(w)
-    R = torch.eye(3).to(device) + w_skew * torch.sin(q) + w_skew @ w_skew * (1-torch.cos(q))
-
+    R = torch.tensordot(torch.ones_like(q).unsqueeze(0), torch.eye(3).unsqueeze(0).to(device), dims=([0],[0])) \
+        + torch.tensordot(torch.sin(q).unsqueeze(0), w_skew.unsqueeze(0),dims = ([0],[0]))\
+            + torch.tensordot( (1-torch.cos(q)).unsqueeze(0), (w_skew@w_skew).unsqueeze(0), dims =([0],[0]))
     return R
+#%%

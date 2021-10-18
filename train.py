@@ -21,7 +21,7 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(SEED)
 random.seed(SEED)
 
-def train_iteration(model, optimizer, input, label,loss_fn, regul_fn, args):
+def train_epoch(model, optimizer, input, label,loss_fn, regul_fn, args):
     output = model(input)
     loss = loss_fn(output,label)
     regularizer_loss = args.TwistNormCoefficient * regul_fn(model)
@@ -29,14 +29,22 @@ def train_iteration(model, optimizer, input, label,loss_fn, regul_fn, args):
     optimizer.zero_grad()
     total_loss.backward()
     optimizer.step()
+    # model.update()
 
-    return loss
+    return total_loss
 
+def test_epoch(model, input, label,loss_fn, regul_fn, args):
+    output = model(input)
+    loss = loss_fn(output,label)
+    regularizer_loss = args.TwistNormCoefficient * regul_fn(model)
+    total_loss = loss + regularizer_loss
+
+    return total_loss
 
 def main(args):
     #set logger
-    wandb.init(project = args.pname)
-    delta_time = [0,0,0,0,0]
+    if args.wandb:
+        wandb.init(project = args.pname)
 
     #set device
     os.environ["CUDA_VISIBLE_DEVICES"]=args.device
@@ -46,7 +54,6 @@ def main(args):
     #set model
     model = Model(args.n_joint, args.input_dim)
     model = model.to(device)
-    model.train()
 
     #load weight when requested
     if os.path.isfile(args.resume_dir):
@@ -68,43 +75,64 @@ def main(args):
     Path(pathname).mkdir(parents=True, exist_ok=True)
 
     #set dataloader
-    data_loader = ToyDataloader(args.data_path, args.n_workers, args.batch_size)
-    data_loader = iter(data_loader)
-    for iterate in range(args.iterations):
-        #estimate eta
-        time_start = time.time()
-        
-        if iterate > 5:
-            avg_time = sum(delta_time)/len(delta_time)
-            eta_time = (args.iterations - iterate) * avg_time
-            h = int(eta_time //3600)
-            m = int((eta_time %3600)//60)
-            s = int((eta_time %60))
-            print("iteration: {}, eta:{}:{}:{}".format(iterate,h,m,s))
-        else: 
-            print("iteration: {}".format(iterate))
-
-        (input,label) = next(data_loader)
-        input = input.to(device)
-        label = label.to(device)
-        train_loss = train_iteration(model, optimizer, input, label, loss_fn, regul_fn, args)
-        print('TrainLoss: {}'.format(train_loss))
-        time_end = time.time()
-        delta_time[iterate%5] = time_end-time_start
-
-        #save train_loss from last epoch
-        wandb.log({'TrainLossScenc':train_loss},step = iterate)
+    print("Setting up dataloader")
+    train_data_loader = ToyDataloader(args.data_path+'/train', args.n_workers, args.batch_size)
+    test_data_loader = ToyDataloader(args.data_path+'/test', args.n_workers, args.batch_size)
     
+    print("Initalizing Training loop")
+    for epoch in range(args.epochs):
+        # Timer start
+        time_start = time.time()
 
-    #save model 
-    if (iterate+1) % args.save_period==0:
-        filename = args.save_dir + '/checkpoint_{}'.format(iterate+1)
-        print("saving... {}".format(filename))
-        state = {
-            'state_dict':model.state_dict(),
-            'optimizer':optimizer.state_dict()
-        }
-        torch.save(state, filename)
+        # Train
+        model.train()
+        data_length = len(train_data_loader)
+        for iterate, (input,label) in enumerate(train_data_loader):
+            input = input.to(device)
+            label = label.to(device)
+            train_loss = train_epoch(model, optimizer, input, label, loss_fn, regul_fn, args)
+            print('Epoch:{}, TrainLoss:{:.2f}, Progress:{:.2f}%'.format(epoch,train_loss,100*iterate/data_length), end='\r')
+        print('Epoch:{}, TrainLoss:{:.2f}, Progress:{:.2f}%'.format(epoch,train_loss,100*iterate/data_length))
+        
+        #Evaluate
+        model.eval()
+        data_length = len(test_data_loader)
+        test_loss = np.array([])
+        for iterate, (input,label) in enumerate(test_data_loader):
+            input = input.to(device)
+            label = label.to(device)
+            total_loss = test_epoch(model, input, label, loss_fn, regul_fn, args)
+            total_loss = total_loss.detach().cpu().numpy()
+            test_loss = np.append(test_loss, total_loss)
+            print('Testing...{:.2f} Epoch:{}, Progress:{:.2f}%'.format(total_loss,epoch,100*iterate/data_length) , end='\r')
+        
+        test_loss = test_loss.mean()
+        print('TestLoss:{:.2f}'.format(test_loss))
+
+        # Timer end    
+        time_end = time.time()
+        avg_time = time_end-time_start
+        eta_time = (args.epochs - epoch) * avg_time
+        h = int(eta_time //3600)
+        m = int((eta_time %3600)//60)
+        s = int((eta_time %60))
+        print("Epoch: {}, TestLoss:{}, eta:{}:{}:{}".format(epoch, test_loss, h,m,s))
+        
+        # Log to wandb
+        if args.wandb:
+            wandb.log({'TrainLoss':train_loss, 'TestLoss':test_loss, 'TimePerEpoch':avg_time},step = epoch)
+
+        #save model 
+        if (epoch+1) % args.save_period==0:
+            filename = args.save_dir + '/checkpoint_{}.pth'.format(epoch+1)
+            print("saving... {}".format(filename))
+            state = {
+                'state_dict':model.state_dict(),
+                'optimizer':optimizer.state_dict(),
+                'n_joint':args.n_joint,
+                'input_dim':args.input_dim
+            }
+            torch.save(state, filename)
 
 
 if __name__ == '__main__':
@@ -131,15 +159,14 @@ if __name__ == '__main__':
     #                 help='optimizer option')
     args.add_argument('--loss_function', default= 'Pos_norm2',type=str,
                     help='get loss function')
-    args.add_argument('--minimal_params', default=True)
-    args.add_argument('--use_adjoint', default=False)
+    args.add_argument('--wandb', action = 'store_true', help = 'Use wandb to log')
     args.add_argument('--input_dim', default= 2, type=int,
                     help='dimension of input')
-    args.add_argument('--iterations', default= 300, type=int,
+    args.add_argument('--epochs', default= 5, type=int,
                     help='number of epoch to perform')
-    args.add_argument('--early_stop', default= 50, type=int,
-                    help='number of n_Scence to early stop')
-    args.add_argument('--save_period', default= 100, type=int,
+    # args.add_argument('--early_stop', default= 50, type=int,
+    #                 help='number of n_Scence to early stop')
+    args.add_argument('--save_period', default= 1, type=int,
                     help='number of scenes after which model is saved')
     args.add_argument('--TwistNormCoefficient', default= 0.1, type=float,
                     help='Coefficient for TwistNorm')

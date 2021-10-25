@@ -57,10 +57,11 @@ def main(args):
 
     #load weight when requested
     if os.path.isfile(args.resume_dir):
-        model = torch.load(args.resume_dir)
-
+        weight = torch.load(args.resume_dir)
+        model.load_state_dict(weight['state_dict'])
+        print("loading successful!")
     #set optimizer
-    optimizer = torch.optim.SGD(model.parameters(),lr= args.lr, weight_decay=args.wd)
+    optimizer = torch.optim.Adam(model.parameters(),lr= args.lr, weight_decay=args.wd)
     
     #declare loss function
     Loss = Get_Loss_Function()
@@ -76,8 +77,8 @@ def main(args):
 
     #set dataloader
     print("Setting up dataloader")
-    train_data_loader = ToyDataloader(args.data_path+'/train', args.n_workers, args.batch_size)
-    test_data_loader = ToyDataloader(args.data_path+'/test', args.n_workers, args.batch_size)
+    train_data_loader = FoldToyDataloader(args.data_path, args.Foldstart, args.Foldend, args.n_workers, args.batch_size)
+    test_data_loader = FoldToyDataloader(args.data_path, args.Foldend, -1, args.n_workers, args.batch_size)
     
     print("Initalizing Training loop")
     for epoch in range(args.epochs):
@@ -116,7 +117,7 @@ def main(args):
         h = int(eta_time //3600)
         m = int((eta_time %3600)//60)
         s = int((eta_time %60))
-        print("Epoch: {}, TestLoss:{}, eta:{}:{}:{}".format(epoch, test_loss, h,m,s))
+        print("Epoch: {}, TestLoss:{:.2f}, eta:{}:{}:{}".format(epoch, test_loss, h,m,s))
         
         # Log to wandb
         if args.wandb:
@@ -124,7 +125,7 @@ def main(args):
 
         #save model 
         if (epoch+1) % args.save_period==0:
-            filename = args.save_dir + '/checkpoint_{}.pth'.format(epoch+1)
+            filename =  pathname + '/checkpoint_{}.pth'.format(epoch+1)
             print("saving... {}".format(filename))
             state = {
                 'state_dict':model.state_dict(),
@@ -147,13 +148,13 @@ if __name__ == '__main__':
                     help='path to save model')
     args.add_argument('--resume_dir', default= './output/',type=str,
                     help='path to load model')
-    args.add_argument('--device', default= '1',type=str,
+    args.add_argument('--device', default= '3',type=str,
                     help='device to use')
     args.add_argument('--n_workers', default= 2, type=int,
                     help='number of data loading workers')
     args.add_argument('--wd', default= 0.00, type=float,
                     help='weight_decay for model layer')
-    args.add_argument('--lr', default= 0.01, type=float,
+    args.add_argument('--lr', default= 0.001, type=float,
                     help='learning rate for model layer')
     # args.add_argument('--optim', default= 'adam',type=str,
     #                 help='optimizer option')
@@ -170,9 +171,12 @@ if __name__ == '__main__':
                     help='number of scenes after which model is saved')
     args.add_argument('--TwistNormCoefficient', default= 0.1, type=float,
                     help='Coefficient for TwistNorm')
-    args.add_argument('--pname', default= 'POE',type=str,
+    args.add_argument('--pname', default= 'POE2D',type=str,
                     help='Project name')
-    
+    args.add_argument('--Foldstart', default= 0, type=int,
+                    help='Number of Fold to start')
+    args.add_argument('--Foldend', default= 8, type=int,
+                    help='Number of Fole to end')
     args = args.parse_args()
     main(args)
 #%%

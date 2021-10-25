@@ -72,7 +72,7 @@ if __name__ == '__main__':
     args.add_argument('--data_path', \
         default= './data/2dim_log_spiral/test/2dim_log_spiral_1000.txt',type=str, \
             help='path to model checkpoint')    
-    args.add_argument('--checkpoint', default= './output/1018/checkpoint_50.pth',type=str,
+    args.add_argument('--checkpoint', default= './output/1020/checkpoint_50.pth',type=str,
                     help='path to model checkpoint')
     args.add_argument('--save_dir', default='./2Visualize')
     args = args.parse_args()

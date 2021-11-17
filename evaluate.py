@@ -41,7 +41,7 @@ def main(args):
     jointTwist = np.array([]).reshape(-1,6)
     twists = model.poe_layer.twist
     for twist in twists:
-        twist = twist.squeeze(1).detach().cpu().numpy()
+        twist = twist.detach().cpu().numpy()
         jointTwist = np.vstack((jointTwist,twist))
     np.savetxt(args.save_dir+'/jointTwist.txt',jointTwist)
 
@@ -70,9 +70,9 @@ def main(args):
 if __name__ == '__main__':
     args = argparse.ArgumentParser(description= 'parse for POENet')
     args.add_argument('--data_path', \
-        default= './data/2dim_log_spiral/test/2dim_log_spiral_1000.txt',type=str, \
+        default= './data/2dim_log_spiral/fold9/2dim_log_spiral_921.txt',type=str, \
             help='path to model checkpoint')    
-    args.add_argument('--checkpoint', default= './output/1020/checkpoint_50.pth',type=str,
+    args.add_argument('--checkpoint', default= './output/1116/checkpoint_30.pth',type=str,
                     help='path to model checkpoint')
     args.add_argument('--save_dir', default='./2Visualize')
     args = args.parse_args()

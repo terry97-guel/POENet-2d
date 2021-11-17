@@ -5,121 +5,99 @@ import torch
 #     if vector.shape[0] == 4:
 #         return to_SO3(vector)
 
+def t2pr(t):
+    p = t[:,0:3,3]
+    r = t[:,0:3,0:3]
+    return (p,r)
+
+def t2p(t):
+    device = t.device
+    p = t[:,0:3,3]
+    return p
+
+def pr2x(p,r):
+    device = p.device
+    X = torch.zeros(p.size()[0],6,6,dtype=torch.float).to(device)
+
+    E = torch.transpose(r,1,2)
+
+    X[:,:3,:3] = E
+    X[:,3:,:3] = -torch.matmul(E,skew(p))
+    X[:,3:,3:] = E
+
+    return X
+
+def t2x(t):
+    (p,r) = t2pr(t)
+    
+    X = pr2x(p,r)
+
+    return X
+
+def pr2t(p,r):
+    device = p.device
+    T = torch.zeros(p.size()[0],4,4,dtype=torch.float).to(device)
+
+    
+    T[:,0:3,0:3] = r[:]
+    T[:,0:3,3] =  p[:]
+    T[:,3,3] = 1
+
+    return T
+
 def skew(p):
     device = p.device
-    if len(p.size()) == 2:
-        skew_p = torch.zeros(3,3,dtype=torch.float).to(device)
-        p_temp = p
+    skew_p = torch.zeros(p.size()[0],3,3,dtype=torch.float).to(device)
 
-        skew_p[0,:] = torch.tensor([torch.tensor(0.0), -p_temp[2], p_temp[1]])
-        skew_p[1,:] = torch.tensor([p_temp[2], torch.tensor(0.0), -p_temp[0]])
-        skew_p[2,:] = torch.tensor([-p_temp[1], p_temp[0],torch.tensor(0.0)])
+    zero = torch.zeros(p.size()[0],dtype=torch.float).to(device)
+    skew_p[:,0,:] = torch.vstack([zero, -p[:,2], p[:,1]]).transpose(0,1)
+    skew_p[:,1,:] = torch.vstack([p[:,2], zero, -p[:,0]]).transpose(0,1)
+    skew_p[:,2,:] = torch.vstack([-p[:,1], p[:,0],zero]).transpose(0,1)
 
-    elif len(p.size()) == 3:
-        num_p = p.size()[0]
-        skew_p = torch.zeros(num_p,3,3,dtype=torch.float).to(device)
-    
-        for i in range(num_p):
-            p_temp = p[i]
-
-            skew_p[i,0,:] = torch.tensor([torch.tensor(0.0), -p_temp[2], p_temp[1]])
-            skew_p[i,1,:] = torch.tensor([p_temp[2], torch.tensor(0.0), -p_temp[0]])
-            skew_p[i,2,:] = torch.tensor([-p_temp[1], p_temp[0],torch.tensor(0.0)])
-    elif len(p.size()) == 1:
-        skew_p = torch.tensor([
-            [0, -p[2], p[1]],
-            [p[2], 0, -p[0]],
-            [-p[1], p[0], 0]
-        ]).to(device)
-    else:
-        raise(Exception("demension for p is invalid"))
 
     return skew_p
 
 def rpy2r(rpy):
-    device = rpy.deivce
-    if len(rpy.size()) == 2:
-        assert(rpy.size()[0] == 3)
-        R = torch.zeros(3,3).to(device)
-        num_rpy = 1
+    device = rpy.device
+    R = torch.zeros(rpy.size()[0],3,3,dtype=torch.float).to(device)
 
-        rpy_temp = rpy
-        r = rpy_temp[0]
-        p = rpy_temp[1]
-        y = rpy_temp[2]
+    r = rpy[:,0]
+    p = rpy[:,1]
+    y = rpy[:,2]
 
-        R[0,:] = torch.tensor([
-            torch.cos(y)*torch.cos(p),
-            -torch.sin(y)*torch.cos(r) + torch.cos(y)*torch.sin(p)*torch.sin(r),
-            torch.sin(y)*torch.sin(r)+torch.cos(y)*torch.sin(p)*torch.cos(r)
-            ])
-        
-        R[1,:] = torch.tensor([
-            torch.sin(y)*torch.cos(p),
-            torch.cos(y)*torch.cos(r) + torch.sin(y)*torch.sin(p)*torch.sin(r),
-            -torch.cos(y)*torch.sin(r)+torch.sin(y)*torch.sin(p)*torch.cos(r)
-            ])
+    R[:,0,:] = torch.vstack([
+        torch.cos(y)*torch.cos(p),
+        -torch.sin(y)*torch.cos(r) + torch.cos(y)*torch.sin(p)*torch.sin(r),
+        torch.sin(y)*torch.sin(r)+torch.cos(y)*torch.sin(p)*torch.cos(r)
+        ]).transpose(0,1)
 
-        R[2,:] = torch.tensor([
-            -torch.sin(p),
-            torch.cos(p)*torch.sin(r),
-            torch.cos(p)*torch.cos(r)
-            ])
-    elif len(rpy.size()) == 3:
-        assert(rpy.size()[1] == 3)
-        num_rpy = rpy.size()[0]
-        R = torch.zeros(num_rpy,3,3)
-        
-        for i in range(num_rpy):
-            rpy_temp = rpy[i]
-            r = rpy_temp[0]
-            p = rpy_temp[1]
-            y = rpy_temp[2]
+    R[:,1,:] = torch.vstack([
+        torch.sin(y)*torch.cos(p),
+        torch.cos(y)*torch.cos(r) + torch.sin(y)*torch.sin(p)*torch.sin(r),
+        -torch.cos(y)*torch.sin(r)+torch.sin(y)*torch.sin(p)*torch.cos(r)
+        ]).transpose(0,1)
 
-            R[i,0,:] = torch.tensor([
-                torch.cos(y)*torch.cos(p),
-                -torch.sin(y)*torch.cos(r) + torch.cos(y)*torch.sin(p)*torch.sin(r),
-                torch.sin(y)*torch.sin(r)+torch.cos(y)*torch.sin(p)*torch.cos(r)
-                ])
-            
-            R[i,1,:] = torch.tensor([
-                torch.sin(y)*torch.cos(p),
-                torch.cos(y)*torch.cos(r) + torch.sin(y)*torch.sin(p)*torch.sin(r),
-                -torch.cos(y)*torch.sin(r)+torch.sin(y)*torch.sin(p)*torch.cos(r)
-                ])
-
-            R[i,2,:] = torch.tensor([
-                -torch.sin(p),
-                torch.cos(p)*torch.sin(r),
-                torch.cos(p)*torch.cos(r)
-                ])
-    else:
-        raise(Exception("demension for rpy is invalid"))
+    R[:,2,:] = torch.vstack([
+        -torch.sin(p),
+        torch.cos(p)*torch.sin(r),
+        torch.cos(p)*torch.cos(r)
+        ]).transpose(0,1)
     
     return R
 
-def pr2t(p,r):
-    device = p.device
-    assert(len(p.size()) == len(r.size()))
-    if len(p.size()) == 2:
-        assert(p.size()[0] == 3 & r.size()[0] == 3 & r.size()[0] == 3)
-        T = torch.zeros(4,4,dtype=torch.float).to(device)
+def inv_x(x):
+    device = x.device
+    invX = torch.zeros(x.size()[0],6,6,dtype=torch.float).to(device)
 
-        T[0:3,0:3] = r
-        T[0:3,3] =  p.squeeze()
-        T[3,3] = 1
-    elif len(p.size()) == 3:
-        assert(p.size()[1] == 3 & r.size()[1] == 3 & r.size()[1] == 3)
-        num_p = p.size()[0]
-        T = torch.zeros(num_p,4,4,dtype=torch.float).to(device)
+    E = x[:,:3,:3]
+    temp = x[:,3:,:3]
+    
+    invX[:,:3,:3] = torch.transpose(E,1,2)
+    invX[:,:3,3:] = torch.zeros(x.size()[0],3,3).to(device)
+    invX[:,3:,:3] = torch.transpose(temp,1,2)
+    invX[:,3:,3:] = torch.transpose(E,1,2)
 
-        for i in range(num_p):
-            T[i,0:3,0:3] = r[i]
-            T[i,0:3,3] =  p[i].squeeze()
-            T[i,3,3] = 1
-    else:
-        raise(Exception("demension for position or orientation is invalid"))
-    return T
+    return invX
 
 def srodrigues(twist, q_value, verbose =False): #number of set of twist is one & number of q_value is n_joint
     eps = 1e-10
@@ -138,7 +116,7 @@ def srodrigues(twist, q_value, verbose =False): #number of set of twist is one &
     q_value = q_value * theta
     w = w/theta
     v = v/theta
-    w_skew = skew(w)
+    w_skew = skew(w.unsqueeze(0)).squeeze(0)
 
     # print("q_value:", q_value.device)
     # print("w:", w.device)
@@ -169,7 +147,7 @@ def rodrigues(w,q,verbose = False):
     w = w/theta
     q = q*theta
 
-    w_skew = skew(w)
+    w_skew = skew(w.unsqueeze(0)).squeeze(0)
     R = torch.tensordot(torch.ones_like(q).unsqueeze(0), torch.eye(3).unsqueeze(0).to(device), dims=([0],[0])) \
         + torch.tensordot(torch.sin(q).unsqueeze(0), w_skew.unsqueeze(0),dims = ([0],[0]))\
             + torch.tensordot( (1-torch.cos(q)).unsqueeze(0), (w_skew@w_skew).unsqueeze(0), dims =([0],[0]))

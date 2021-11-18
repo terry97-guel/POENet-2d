@@ -46,7 +46,9 @@ def main(args):
         pos_diff = output-target_pos
         print("Iter:{}  Loss:{}, input#1:{}, input#2:{}".format(loop,loss, input[0][0], input[0][1]))
 
-        input[0] = input[0] - args.lambda1 * (jacob.t() @ pos_diff.t()).t()
+        input[0] = input[0] - \
+            (jacob.t() @ (args.lambda1 *pos_diff + args.lambda2 * torch.sign(pos_diff)).t() ).t()
+        
         
         input[0][0].clamp_(0.5,3.5)
         input[0][1].clamp_(0.2,3.2)
@@ -70,7 +72,8 @@ if __name__ == '__main__':
                     help='control input #2')
     args.add_argument('--lambda1', default= 0.01, type=float,
                     help='step size jacobian transpose #1')
-
+    args.add_argument('--lambda2', default= 0, type=float,
+                    help='step size jacobian transpose #2')
     args.add_argument('--save_dir', default='./2Visualize')
     args = args.parse_args()
     main(args)
